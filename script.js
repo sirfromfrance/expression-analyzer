@@ -1,6 +1,6 @@
 const TOKEN = [
   ["number", /\d+(\.\d+)?/y],
-  ["func", /\b(sin|cos|tan)\b/y],
+  ["func", /\b(sin|cos|tan|log|sqrt|round|abs|ceil|floor)\b/y],
   ["constant", /\b(pi|e)\b/y],
   ["variable", /[a-zA-Z_]\w*/y],
   ["operator", /[+\-*\/^]/y],
@@ -205,7 +205,11 @@ function analyzeExpression(input) {
   try {
     const tokens = lexAnalyzer(input);
     const result = syntaxAnalyzer(tokens);
-
+    console.log("Лексичний аналіз:");
+    tokens.forEach((t) =>
+      console.log(`  [${t.position}] ${t.type}: '${t.value}'`)
+    );
+    console.log("Синтаксичний аналіз:");
     if (result.valid) {
       console.log("вираз правильний\n");
     } else {
@@ -220,7 +224,7 @@ function analyzeExpression(input) {
   }
 }
 
-const tests = ["*3+5", ")x+5", "(5*4+)3", "2***4"];
+const tests = ["*3+5", ")x+5", "(5*4+)3", "2***4", "abs(-5)+round(4.67)"];
 
 console.log("Аналіз виразів:");
 tests.forEach((expr) => analyzeExpression(expr));
