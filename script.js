@@ -26,122 +26,201 @@ function lexAnalyzer(input) {
       }
     }
     if (!match)
-      throw new Error(
-        `unexpected character input '${input[pos]}' at position ${pos}`
-      );
+      throw new Error(`Невідомий символ '${input[pos]}' на позиції ${pos}`);
   }
   return tokens;
 }
 
-console.log(lexAnalyzer("3 + cos(pi)"));
+const State = {
+  START: "START",
+  EXPECT_OPERAND: "EXPECT_OPERAND",
+  AFTER_OPERAND: "AFTER_OPERAND",
+  AFTER_OPERATOR: "AFTER_OPERATOR",
+  AFTER_FUNC: "AFTER_FUNC",
+  IN_FUNC_ARGS: "IN_FUNC_ARGS",
+  AFTER_LPAREN: "AFTER_LPAREN",
+};
 
-function syntaxAnalyzer(tokens, input) {
+function syntaxAnalyzer(tokens) {
   const errors = [];
-  let parenthesis = [];
-  let prev = null;
+  const parenStack = [];
+  let state = State.START;
+  let pos = 0;
 
-  for (let i = 0; i < tokens.length; i++) {
-    const curr = tokens[i];
-
-    if (i == 0) {
-      if (curr.type === "operator" || curr.type === "rparen") {
-        errors.push({
-          msg: `Вираз не може починатися з '${curr.value}' at position ${curr.position}`,
-          position: curr.position,
-        });
-      }
+  const current = () => (pos < tokens.length ? tokens[pos] : null);
+  const prev = () => (pos > 0 ? tokens[pos - 1] : null);
+  const addError = (msg, token = current()) => {
+    if (token) {
+      errors.push({ position: token.position, message: msg });
+    } else {
+      errors.push({
+        position: tokens[tokens.length - 1]?.position || 0,
+        message: msg,
+      });
     }
+  };
 
-    if (curr.type === "lparen") {
-      parenthesis.push(curr.position);
-    } else if (curr.type === "rparen") {
-      if (parenthesis.length === 0) {
-        errors.push({
-          msg: `Зайва закрита дужка ')'`,
-          position: curr.position,
-        });
-      } else {
-        parenthesis.pop();
-      }
-    }
+  const isOperand = (t) =>
+    t && ["number", "variable", "constant"].includes(t.type);
+  const isUnary = (t) =>
+    t && t.type === "operator" && ["+", "-"].includes(t.value);
 
-    if (prev) {
-      if (prev.type === "operator" && curr.type === "operator") {
-        errors.push({
-          msg: `Кілька операторів підряд '${prev.value}${curr.value}'`,
-          position: curr.position,
-        });
-      }
-      if (prev.type === "number" && curr.type === "lparen") {
-        errors.push({
-          msg: `Відсутній оператор між числом і дужкою `,
-          postion: curr.position,
-        });
-      }
-      if (prev.type === "rparen" && curr.type === "number") {
-        errors.push({
-          msg: `Відсутній оператор між дужкою і числом`,
-          position: curr.position,
-        });
-      }
-      if (prev.type === "variable" && curr.type === "lparen") {
-        errors.push({
-          msg: `Відсутній оператор між змінною і дужкою`,
-          position: curr.position,
-        });
-      }
-      if (prev.type === "rparen" && curr.type === "variable") {
-        errors.push({
-          msg: `Відсутній оператор між дужкою і змінною`,
-          position: curr.position,
-        });
-      }
-      if (prev.type === "lparen" && curr.type === "rparen") {
-        errors.push({ msg: `Порожні дужки '()'`, position: curr.position });
-      }
-      if (prev.type === "operator" && curr.type === "rparen") {
-        errors.push({
-          msg: `Відсутній операнд перед дужкою ')'`,
-          position: curr.position,
-        });
-      }
-      if (prev.type === "lparen" && curr.type === "operator") {
-        errors.push({
-          msg: `Відсутній операнд після дужки '('`,
-          position: curr.position,
-        });
-      }
+  while (pos < tokens.length) {
+    const token = current();
+
+    switch (state) {
+      case State.START:
+        if (isOperand(token)) {
+          state = State.AFTER_OPERAND;
+        } else if (token.type === "func") {
+          state = State.AFTER_FUNC;
+        } else if (token.type === "lparen") {
+          parenStack.push(token.position);
+          state = State.AFTER_LPAREN;
+        } else if (isUnary(token)) {
+          state = State.AFTER_OPERATOR;
+        } else if (token.type === "operator") {
+          addError(`Вираз не може починатись з оператора '${token.value}'`);
+          state = State.AFTER_OPERATOR;
+        } else if (token.type === "rparen") {
+          addError("Неочікувана закриваюча дужка на початку виразу");
+        }
+        break;
+
+      case State.AFTER_OPERAND:
+        if (token.type === "operator") {
+          state = State.AFTER_OPERATOR;
+        } else if (token.type === "rparen") {
+          if (parenStack.length === 0) {
+            addError("Закриваюча дужка не має парної відкриваючої");
+          } else {
+            parenStack.pop();
+          }
+        } else if (token.type === "lparen") {
+          addError("Пропущено оператор перед дужкою");
+          parenStack.push(token.position);
+          state = State.AFTER_LPAREN;
+        } else if (isOperand(token) || token.type === "func") {
+          addError("Пропущено оператор між операндами");
+          state =
+            token.type === "func" ? State.AFTER_FUNC : State.AFTER_OPERAND;
+        }
+        break;
+
+      case State.AFTER_OPERATOR:
+        if (isOperand(token)) {
+          state = State.AFTER_OPERAND;
+        } else if (token.type === "func") {
+          state = State.AFTER_FUNC;
+        } else if (token.type === "lparen") {
+          parenStack.push(token.position);
+          state = State.AFTER_LPAREN;
+        } else if (isUnary(token)) {
+        } else if (token.type === "operator") {
+          addError(`Подвійний оператор '${prev().value}' та '${token.value}'`);
+        } else if (token.type === "rparen") {
+          addError(`Закриваюча дужка після оператора '${prev().value}'`);
+          if (parenStack.length > 0) parenStack.pop();
+          state = State.AFTER_OPERAND;
+        }
+        break;
+
+      case State.AFTER_FUNC:
+        if (token.type === "lparen") {
+          parenStack.push(token.position);
+          state = State.IN_FUNC_ARGS;
+        } else {
+          addError(`Очікувалась '(' після функції '${prev().value}'`);
+        }
+        break;
+
+      case State.IN_FUNC_ARGS:
+        if (isOperand(token)) {
+          state = State.AFTER_OPERAND;
+        } else if (token.type === "func") {
+          state = State.AFTER_FUNC;
+        } else if (token.type === "lparen") {
+          parenStack.push(token.position);
+          state = State.AFTER_LPAREN;
+        } else if (isUnary(token)) {
+          state = State.AFTER_OPERATOR;
+        } else if (token.type === "rparen") {
+          if (parenStack.length > 0) parenStack.pop();
+          state = State.AFTER_OPERAND;
+        }
+        break;
+
+      case State.AFTER_LPAREN:
+        if (isOperand(token)) {
+          state = State.AFTER_OPERAND;
+        } else if (token.type === "func") {
+          state = State.AFTER_FUNC;
+        } else if (token.type === "lparen") {
+          parenStack.push(token.position);
+        } else if (isUnary(token)) {
+          state = State.AFTER_OPERATOR;
+        } else if (
+          token.type === "operator" &&
+          ["^", "*", "/"].includes(token.value)
+        ) {
+          addError(`Оператор '${token.value}' після відкритої дужки`);
+          state = State.AFTER_OPERATOR;
+        } else if (token.type === "rparen") {
+          const p = prev();
+          if (
+            p &&
+            p.type === "lparen" &&
+            pos >= 2 &&
+            tokens[pos - 2].type !== "func"
+          ) {
+            addError("Порожні дужки не дозволені");
+          }
+          if (parenStack.length > 0) parenStack.pop();
+          state = State.AFTER_OPERAND;
+        }
+        break;
     }
-    prev = curr;
+    pos++;
   }
 
-  const lastToken = tokens[tokens.length - 1];
-  if (lastToken?.type === "operator" || lastToken?.type === "lparen") {
-    errors.push(
-      `Вираз не може закінчуватися на '${lastToken.value}' at position ${lastToken.position}`
-    );
+  if (state === State.AFTER_OPERATOR) {
+    addError("Вираз не може закінчуватись оператором");
+  } else if (state === State.AFTER_FUNC) {
+    addError("Функція без дужок");
   }
 
-  while (parenthesis.length > 0) {
-    errors.push({
-      msg: `Незакрита дужка '('`,
-      position: parenthesis.pop(),
-    });
-  }
+  parenStack.forEach((p) => {
+    errors.push({ position: p, message: `Незакрита дужка` });
+  });
 
-  if (errors.length) {
-    console.log("Синтаксичні помилки:");
-    errors.forEach((error) => {
-      console.log(`${error.msg} at position ${error.position}`);
-      console.log(input);
-      console.log(" ".repeat(error.position) + "^");
+  return {
+    valid: errors.length === 0,
+    errors: errors.sort((a, b) => a.position - b.position),
+  };
+}
+
+function analyzeExpression(input) {
+  console.log(`\nВираз: "${input}"`);
+
+  try {
+    const tokens = lexAnalyzer(input);
+    const result = syntaxAnalyzer(tokens);
+
+    if (result.valid) {
+      console.log("вираз правильний\n");
+    } else {
+      console.log(" Помилки:");
+      result.errors.forEach((err) => {
+        console.log(`  [${err.position}] ${err.message}`);
+      });
       console.log();
-    });
-  } else {
-    console.log("Синтаксичних помилок не знайдено.");
+    }
+  } catch (error) {
+    console.log(`Лексична помилка: ${error.message}\n`);
   }
 }
 
-const input = "sin() + cos(y)";
-const tokens = lexAnalyzer(input);
-syntaxAnalyzer(tokens, input);
+const tests = ["*3+5", ")x+5", "(5*4+)3", "2***4"];
+
+console.log("Аналіз виразів:");
+tests.forEach((expr) => analyzeExpression(expr));
